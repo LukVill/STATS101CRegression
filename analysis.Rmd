@@ -1,5 +1,44 @@
+---
+title: "Stats 101C - Regression Project"
+author: "Instructions"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    extra_dependencies: ["amsmath"]
+  html_document: default
+---
+```{r, echo = FALSE, message=FALSE}
+library(knitr)
+library(tidyverse)
+library(tidymodels)
+library(stringr)
+```
+
+Getting initial glimpse of the data:
+
 ```{r}
 
-read.csv("column_descriptions.csv")
+# input into terminal the filepath to the Git project folder (containing train.csv)
+x <- readline()
+filepath <- gsub("\\\\","/",x)
+trainFilepath <- paste0(filepath,"/train.csv")
+testFilepath <- paste0(filepath,"/test.csv")
+
+
+train <- read.csv(trainFilepath)
+test <- read.csv(testFilepath)
+
+```
+
+```{r personal insights, message=F, eval=F}
+
+glimpse(train)
+glimpse(test)
+
+```
+
+```{r}
+
+
 
 ```
