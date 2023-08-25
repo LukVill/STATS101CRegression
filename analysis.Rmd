@@ -14,6 +14,18 @@ library(tidymodels)
 library(stringr)
 ```
 
+
+# Gameplan:
+
+  - vfold CV the training data
+  - Try multiple models: linear, multiple linear, tree, random forest, boosted tree, 
+  - try multiple recipes: transformations on data
+  - make models tunable with different parameters
+  - make workflows with the different combinations of recipes and models AND different parameters
+  - top 5 best result on assessment data will move on to the testing data
+  - find best combination of model, recipe, parameters for the testing data
+
+
 Getting initial glimpse of the data:
 
 ```{r}
@@ -23,10 +35,12 @@ x <- readline()
 filepath <- gsub("\\\\","/",x)
 trainFilepath <- paste0(filepath,"/train.csv")
 testFilepath <- paste0(filepath,"/test.csv")
-
+columnDescFilepath <- paste0(filepath,"/column_descriptions.csv")
 
 train <- read.csv(trainFilepath)
 test <- read.csv(testFilepath)
+column_desc <- read.csv(columnDescFilepath)
+
 
 ```
 
@@ -34,10 +48,11 @@ test <- read.csv(testFilepath)
 
 glimpse(train)
 glimpse(test)
+view(column_desc)
 
 ```
 
-```{r}
+```{r visualization of data}
 
 
 
