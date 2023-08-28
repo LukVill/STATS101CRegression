@@ -24,6 +24,7 @@ library(stringr)
   - make workflows with the different combinations of recipes and models AND different parameters
   - top 5 best result on assessment data will move on to the testing data
   - find best combination of model, recipe, parameters for the testing data
+    - find lowest RMSE and highest RSQ 
 
 
 Getting initial glimpse of the data:
