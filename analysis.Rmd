@@ -54,12 +54,18 @@ view(column_desc)
 ```{r visualization of data}
 
 summary(train)
+help("step_BoxCox")
+
+# calculate sd of each column to see which one is weirdly distributed
+
+sd()
 
 ```
 
-Data has big min's and max's, so there might be some need for sample stratification OR transformation.
+Data has big min's and max's, so there might be some need for sample stratification OR transformation. Most likely a log transformation because the predictor is percentage, so the range is only from 0-1.
 
 ```{r transforming data via recipes}
+
 
 
 ```
