@@ -8,11 +8,15 @@ output:
   html_document: default
 ---
 ```{r, echo = FALSE, message=FALSE}
+# INSTALL ALL THESE PACKAGES
 library(knitr)
 library(tidyverse)
 library(tidymodels)
 library(stringr)
 library(corrplot)
+library(yardstick)
+library(ranger)
+library(xgboost)
 ```
 
 
@@ -92,10 +96,10 @@ We are splitting the training data into 233 partitions to cross validate.
 set.seed(101)
 
 # going to use 233 partitions so there would be close to 10 used for assessment
-train_split <- vfold_cv(train, v = 233)
+train_split <- vfold_cv(train, v = 10)
 
 # make strata be response variable
-train_split_strata <- vfold_cv(train, v = 233, strata = percent_dem)
+train_split_strata <- vfold_cv(train, v = 10, strata = percent_dem)
 
 ```
 
@@ -147,6 +151,15 @@ wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
 ```
 
 ```{r default recipe workflow pipeline}
+
+# TUNING PARAMETERS: try using both regular AND random gridding
+wf_metrics <- metric_set(rmse, rsq, mape)
+
+# tune each model to the folds and find best parameters (tune_grid) 
+# generalize the parameters for now, fine tune them once a general model has been chosen
+wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
+
+# find best model 
 
 ```
 
