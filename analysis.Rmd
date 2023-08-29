@@ -12,6 +12,7 @@ library(knitr)
 library(tidyverse)
 library(tidymodels)
 library(stringr)
+library(corrplot)
 ```
 
 
@@ -54,11 +55,8 @@ view(column_desc)
 ```{r visualization of data}
 
 summary(train)
-help("step_BoxCox")
 
-# calculate sd of each column to see which one is weirdly distributed
-
-sd()
+ncol(train)
 
 ```
 
@@ -66,9 +64,40 @@ Data has big min's and max's, so there might be some need for sample stratificat
 
 ```{r transforming data via recipes}
 
+selectCols <- colnames(train)[2:115]
 
+# remove name from training data
+train$name <- NULL
+
+# possible transformations: log, normalization, boxcox
+
+# offset by 1 because there are some 0's in the data
+
+# remove na observations
+
+# remove all highly correlated data to avoid multicollinearity that would affect ML models
+
+# NOTE: ALL OF THESE RECIPES OFFSET THE DATA FIRST BY 1 BEFORE TRANSFORMING
+
+rec <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(threshold = 0.9)
+
+log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
+
+norm_rec <- rec %>% step_normalize(all_numeric_predictors())
+
+log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
+
+norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
+
+box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
+
+log_box_rec <- rec %>% step_log(all_numeric_predictors()) %>% step_BoxCox(all_numeric_predictors())
+
+box_log_rec <- rec %>% step_BoxCox(all_numeric_predictors()) %>% step_log(all_numeric_predictors()) 
 
 ```
+
+We are splitting the training data into 233 partitions to cross validate.
 
 ```{r v fold}
 
@@ -95,3 +124,12 @@ boost_tree_model <- boost_tree(mtry = tune(), trees = tune(), min_n = tune(), le
 ```
 
 Possible models: linear, decision tree, random forest, boosted tree
+
+```{r workflow creation}
+
+# make list of recipes and models to combine different permutations in workflows
+# make them work for CV resampling
+
+
+
+```
