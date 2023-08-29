@@ -60,11 +60,11 @@ ncol(train)
 
 ```
 
+Response variable has a skewed right distribution (median is on the lower end). Possibly should normalize the response variable.
+
 Data has big min's and max's, so there might be some need for sample stratification OR transformation. Most likely a log transformation because the predictor is percentage, so the range is only from 0-1.
 
 ```{r transforming data via recipes}
-
-selectCols <- colnames(train)[2:115]
 
 # remove name from training data
 train$name <- NULL
@@ -79,7 +79,12 @@ train$name <- NULL
 
 # NOTE: ALL OF THESE RECIPES OFFSET THE DATA FIRST BY 1 BEFORE TRANSFORMING
 
-rec <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(threshold = 0.9)
+rec_default <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(all_numeric_predictors(), threshold = 0.9)
+
+rec_norm_resp <- rec_default %>% step_normalize(all_outcomes())
+
+# make a function to attach pipeline to both default rec and normalized resp. rec
+rec <- NULL
 
 log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
 
