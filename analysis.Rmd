@@ -79,7 +79,8 @@ train$name <- NULL
 
 # NOTE: ALL OF THESE RECIPES OFFSET THE DATA FIRST BY 1 BEFORE TRANSFORMING
 
-rec_default <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(all_numeric_predictors(), threshold = 0.9)
+# TUNABLE PARAMS: threshold
+rec_default <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(all_numeric_predictors(), threshold = tune())
 
 rec_norm_resp <- rec_default %>% step_normalize(all_outcomes())
 
@@ -114,17 +115,23 @@ set.seed(101)
 # going to use 233 partitions so there would be close to 10 used for assessment
 train_split <- vfold_cv(train, v = 233)
 
+# make strata be response variable
+train_split_strata <- vfold_cv(train, v = 233, strata = percent_dem)
+
 ```
 
 ```{r model creation}
 
 linear_model <- linear_reg() %>% set_engine("lm") %>% set_mode("regression")
 
-tree_model <- decision_tree(min_n = tune(), cost_complexity = tune(), tree_depth = tune()) %>% set_engine("rpart") %>% set_mode("regression")
+# TUNABLE PARAMS: cost_complexity, tree depth
+tree_model <- decision_tree(cost_complexity = tune(), tree_depth = tune()) %>% set_engine("rpart") %>% set_mode("regression")
 
-r_forest_model <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% set_engine("ranger") %>% set_mode("regression")
+# TUNABLE PARAMS: tree num, min n for each node
+r_forest_model <- rand_forest(trees = tune(), min_n = tune()) %>% set_engine("ranger") %>% set_mode("regression")
 
-boost_tree_model <- boost_tree(mtry = tune(), trees = tune(), min_n = tune(), learn_rate = tune()) %>% set_engine("xgboost")
+# TUNABLE PARAMS: tree num, min n for each node, learn rate
+boost_tree_model <- boost_tree(trees = tune(), min_n = tune(), learn_rate = tune()) %>% set_engine("xgboost")
 
 ```
 
