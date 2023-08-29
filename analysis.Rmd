@@ -50,10 +50,6 @@ glimpse(train)
 glimpse(test)
 view(column_desc)
 
-```
-
-```{r visualization of data}
-
 summary(train)
 
 ncol(train)
@@ -83,23 +79,6 @@ train$name <- NULL
 rec_default <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_naomit(all_numeric_predictors()) %>% step_naomit(all_numeric_predictors()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_corr(all_numeric_predictors(), threshold = tune())
 
 rec_norm_resp <- rec_default %>% step_normalize(all_outcomes())
-
-# make a function to attach pipeline to both default rec and normalized resp. rec
-rec <- NULL
-
-log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
-
-norm_rec <- rec %>% step_normalize(all_numeric_predictors())
-
-log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
-
-norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
-
-box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
-
-log_box_rec <- rec %>% step_log(all_numeric_predictors()) %>% step_BoxCox(all_numeric_predictors())
-
-box_log_rec <- rec %>% step_BoxCox(all_numeric_predictors()) %>% step_log(all_numeric_predictors()) 
 
 ```
 
@@ -131,17 +110,67 @@ tree_model <- decision_tree(cost_complexity = tune(), tree_depth = tune()) %>% s
 r_forest_model <- rand_forest(trees = tune(), min_n = tune()) %>% set_engine("ranger") %>% set_mode("regression")
 
 # TUNABLE PARAMS: tree num, min n for each node, learn rate
-boost_tree_model <- boost_tree(trees = tune(), min_n = tune(), learn_rate = tune()) %>% set_engine("xgboost")
+boost_tree_model <- boost_tree(trees = tune(), min_n = tune(), learn_rate = tune()) %>% set_engine("xgboost") %>% set_mode("regression")
+
+model_list <- list(linear_model, tree_model, r_forest_model, boost_tree_model)
 
 ```
 
 Possible models: linear, decision tree, random forest, boosted tree
 
-```{r workflow creation}
+```{r workflow creation for default recipe}
 
 # make list of recipes and models to combine different permutations in workflows
 # make them work for CV resampling
 
+rec <- rec_default
 
+log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
+
+norm_rec <- rec %>% step_normalize(all_numeric_predictors())
+
+log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
+
+norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
+
+box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
+
+log_box_rec <- rec %>% step_log(all_numeric_predictors()) %>% step_BoxCox(all_numeric_predictors())
+
+box_log_rec <- rec %>% step_BoxCox(all_numeric_predictors()) %>% step_log(all_numeric_predictors())
+
+recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec, log_box_rec = log_box_rec, box_log_rec = box_log_rec)
+
+# make list of workflows
+wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
+
+```
+
+```{r default recipe workflow pipeline}
+
+```
+
+```{r workflow creation for transformed response recipe}
+
+rec <- rec_norm_resp
+
+log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
+
+norm_rec <- rec %>% step_normalize(all_numeric_predictors())
+
+log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
+
+norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
+
+box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
+
+log_box_rec <- rec %>% step_log(all_numeric_predictors()) %>% step_BoxCox(all_numeric_predictors())
+
+box_log_rec <- rec %>% step_BoxCox(all_numeric_predictors()) %>% step_log(all_numeric_predictors())
+
+recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec, log_box_rec = log_box_rec, box_log_rec = box_log_rec)
+
+# make list of workflows
+wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
 
 ```
