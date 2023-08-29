@@ -96,10 +96,10 @@ We are splitting the training data into 233 partitions to cross validate.
 set.seed(101)
 
 # going to use 233 partitions so there would be close to 10 used for assessment
-train_split <- vfold_cv(train, v = 10)
+train_split <- vfold_cv(train, v = 5)
 
 # make strata be response variable
-train_split_strata <- vfold_cv(train, v = 10, strata = percent_dem)
+train_split_strata <- vfold_cv(train, v = 5, strata = percent_dem)
 
 ```
 
@@ -129,6 +129,7 @@ Possible models: linear, decision tree, random forest, boosted tree
 
 rec <- rec_default
 
+# makes 0 values
 log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
 
 norm_rec <- rec %>% step_normalize(all_numeric_predictors())
@@ -137,13 +138,12 @@ log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_n
 
 norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
 
+# makes 0 values
 box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
 
-log_box_rec <- rec %>% step_log(all_numeric_predictors()) %>% step_BoxCox(all_numeric_predictors())
+# cannot do box and log together because neither likes nonpositive values
 
-box_log_rec <- rec %>% step_BoxCox(all_numeric_predictors()) %>% step_log(all_numeric_predictors())
-
-recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec, log_box_rec = log_box_rec, box_log_rec = box_log_rec)
+recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec)
 
 # make list of workflows
 wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
