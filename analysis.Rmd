@@ -164,6 +164,39 @@ wf_metrics <- metric_set(rmse, rsq)
 wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
 
 wf_metric_res <- wf_res %>% collect_metrics()
+wf_res %>% autoplot()
+wf_res %>% collect_metrics() %>% filter(.metric == "rmse") %>% arrange(mean)
+help(select_best)
+wf_res %>% show_best(metric = "rmse", n = 5)
+
+# find best model 
+
+grid_lin <- grid_regular(parameters(wf_lin), levels = 4)
+
+wf_lin <- workflow() %>% add_model(linear_model) %>% add_recipe(log_norm_rec)
+
+wf_lin_res <- wf_lin %>% tune_grid(resamples = train_split, grid = grid_lin, metrics = wf_metrics)
+
+wf_lin_metric_res <- wf_lin_res %>% show_best(metric = "rmse", n = 5)
+
+final_wf_param <- wf_lin_res %>% select_best(metric = "rmse")
+
+final_model <- finalize_workflow(wf_lin, final_wf_param)
+
+final_model_fit <- final_model %>% fit(data = train)
+
+preds <- final_model_fit %>% predict(new_data = train)
+
+
+training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+
+summary(extract_fit_engine(final_model_fit))
+
+```
+
+```{r}
 
 # TEST CODE
 # test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) %>% step_normalize(all_numeric_predictors())
@@ -171,7 +204,5 @@ wf_metric_res <- wf_res %>% collect_metrics()
 # res <- wf_test %>% tune_grid(resamples = train_split, grid = 5, metrics = wf_metrics)
 # res %>% show_best()
 # autoplot(res)
-
-# find best model 
 
 ```
