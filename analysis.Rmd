@@ -164,7 +164,7 @@ wf_metrics <- metric_set(rmse, rsq, mape)
 wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
 
 # TEST CODE
-# test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
+# test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) %>% step_normalize(all_numeric_predictors())
 # wf_test <- workflow() %>% add_model(r_forest_model) %>% add_recipe(test)
 # res <- wf_test %>% tune_grid(resamples = train_split, grid = 5, metrics = wf_metrics)
 # res%>% show_best()
