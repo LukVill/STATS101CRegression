@@ -194,7 +194,47 @@ rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
 
 summary(extract_fit_engine(final_model_fit))
 
+# make predictions
+preds <- final_model_fit %>% predict(new_data = test)
+test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
+
+# export predictions
+write_csv(test_preds, "pred2.csv")
+
 ```
+
+```{r trying out random forest predictions}
+
+wf_rf <- workflow() %>% add_model(r_forest_model) %>% add_recipe(log_norm_rec)
+
+grid_rf <- grid_regular(parameters(wf_rf), levels = 10)
+
+wf_rf_res <- wf_rf %>% tune_grid(resamples = train_split, grid = grid_rf, metrics = wf_metrics)
+
+wf_rf_metrics <- wf_rf_res %>% show_best(metric = "rmse", n = 5)
+
+final_rf_param <- wf_rf_res %>% select_best(metric = "rmse")
+
+final_rf <- finalize_workflow(wf_rf,final_rf_param)
+
+final_rf_fit <- final_rf %>% fit(data = train)
+
+preds <- final_rf_fit %>% predict(new_data = train)
+
+rf_preds <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = rf_preds)
+
+# trying on test data
+
+test_pred_col <- final_rf_fit %>% predict(new_data = test)
+
+test_rf_pred <- test %>% select(id) %>% bind_cols(test_pred_col) %>% rename(percent_dem = .pred)
+
+write_csv(test_rf_pred, "pred3RF.csv")
+
+```
+
 
 ```{r}
 
