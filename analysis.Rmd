@@ -23,13 +23,14 @@ library(xgboost)
 # Gameplan:
 
   - vfold CV the training data
-  - Try multiple models: multiple linear, tree, random forest, boosted tree, 
+  - Try multiple models: multiple linear, decision tree, random forest, boosted tree, 
   - try multiple recipes: transformations on data
   - make models tunable with different parameters
-  - make workflows with the different combinations of recipes and models AND different parameters
+  - make workflows with the different combinations of recipes and models with some parameters
+  - find best model
+  - fine tune the best model with more parameters
   - top 5 best result on assessment data will move on to the testing data
-  - find best combination of model, recipe, parameters for the testing data
-    - find lowest RMSE and highest RSQ 
+  - find lowest RMSE and highest RSQ 
 
 
 Getting initial glimpse of the data:
@@ -81,11 +82,11 @@ train$name <- NULL
 # NOTE: ALL OF THESE RECIPES OFFSET THE DATA FIRST BY 1 BEFORE TRANSFORMING
 
 # TUNABLE PARAMS: threshold
-rec_knn <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) 
+rec <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors())
 
 # NOTE: we should probably use other methods of imputation
 
-rec_norm <- rec_knn %>% step_normalize(all_outcomes())
+# rec_norm <- rec_knn %>% step_normalize(all_outcomes())
 
 ```
 
@@ -96,11 +97,10 @@ rec_norm <- rec_knn %>% step_normalize(all_outcomes())
 # set seed for reproducibility
 set.seed(101)
 
-# going to use 233 partitions so there would be close to 10 used for assessment
-train_split <- vfold_cv(train, v = 5)
+# train_split <- vfold_cv(train, v = 5)
 
 # make strata be response variable
-train_split_strata <- vfold_cv(train, v = 5, strata = percent_dem)
+train_split <- vfold_cv(train, v = 5, strata = percent_dem)
 
 ```
 
@@ -109,14 +109,14 @@ train_split_strata <- vfold_cv(train, v = 5, strata = percent_dem)
 linear_model <- linear_reg() %>% set_engine("lm") %>% set_mode("regression")
 
 # TUNABLE PARAMS: cost_complexity, tree depth
-tree_model <- decision_tree(cost_complexity = tune(), tree_depth = tune()) %>% set_engine("rpart") %>% set_mode("regression")
+tree_model <- decision_tree(cost_complexity = tune()) %>% set_engine("rpart") %>% set_mode("regression")
 
 # TUNABLE PARAMS: tree num, min n for each node
 r_forest_model <- rand_forest(trees = 400, min_n = tune()) %>% set_engine("ranger") %>% set_mode("regression")
 # random forest creates missing values for some reason when na's are ommitted, so imputation is used instead
 
 # TUNABLE PARAMS: tree num, min n for each node, learn rate
-boost_tree_model <- boost_tree(min_n = tune(), learn_rate = tune()) %>% set_engine("xgboost") %>% set_mode("regression")
+boost_tree_model <- boost_tree(learn_rate = tune()) %>% set_engine("xgboost") %>% set_mode("regression")
 
 model_list <- list(linear_model, tree_model, r_forest_model, boost_tree_model)
 
@@ -131,7 +131,7 @@ Possible models: linear, decision tree, random forest, boosted tree
 # make list of recipes and models to combine different permutations in workflows
 # make them work for CV resampling
 
-rec <- rec_knn
+# rec <- rec_knn
 
 # makes 0 values
 log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
@@ -140,14 +140,14 @@ norm_rec <- rec %>% step_normalize(all_numeric_predictors())
 
 log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
 
-norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
+# norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
 
 # makes 0 values
 box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
 
 # cannot do box and log together because neither likes nonpositive values
 
-recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec)
+recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, box_rec = box_rec)
 
 # make list of workflows
 wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
@@ -157,42 +157,21 @@ wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
 ```{r default recipe workflow pipeline}
 
 # TUNING PARAMETERS: try using both regular AND random gridding
-wf_metrics <- metric_set(rmse, rsq, mape)
+wf_metrics <- metric_set(rmse, rsq)
 
 # tune each model to the folds and find best parameters (tune_grid) 
 # generalize the parameters for now, fine tune them once a general model has been chosen
 wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
 
+wf_metric_res <- wf_res %>% collect_metrics()
+
 # TEST CODE
 # test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) %>% step_normalize(all_numeric_predictors())
 # wf_test <- workflow() %>% add_model(r_forest_model) %>% add_recipe(test)
 # res <- wf_test %>% tune_grid(resamples = train_split, grid = 5, metrics = wf_metrics)
-# res%>% show_best()
-# help("step_naomit")
+# res %>% show_best()
 # autoplot(res)
 
 # find best model 
-
-```
-
-```{r workflow creation for transformed response recipe}
-
-rec <- rec_norm_resp
-
-log_rec <- rec %>% step_log(all_numeric_predictors(), base = 10)
-
-norm_rec <- rec %>% step_normalize(all_numeric_predictors())
-
-log_norm_rec <- rec %>% step_log(all_numeric_predictors(), base = 10) %>% step_normalize(all_numeric_predictors())
-
-norm_log_rec <- rec %>% step_normalize(all_numeric_predictors()) %>% step_log(all_numeric_predictors(), base = 10)
-
-box_rec <- rec %>% step_BoxCox(all_numeric_predictors())
-
-
-recipe_list <- list(log_rec = log_rec, norm_rec = norm_rec, log_norm_rec = log_norm_rec, norm_log_rec = norm_log_rec, box_rec = box_rec)
-
-# make list of workflows
-wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
 
 ```
