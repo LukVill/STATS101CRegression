@@ -148,10 +148,9 @@ mars_model <- mars(num_terms = tune(), prod_degree = tune()) %>%
   set_mode("regression")
 
 # TUNABLE PARAMS: hidden_units, penalty -- neural network ensamble 
-## Note: engine would not be recognized
-# nn_stack <- bag_mlp(hidden_units = tune(), penalty = tune()) %>%
-#   set_mode("regression")
-#   
+# Note: engine would not be recognized
+nn_stack <- bag_mlp(hidden_units = tune(), penalty = tune()) %>% set_engine("nnet") %>% set_mode("regression") 
+
 
 ## Stack Ensamble: Linear Regression (org_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec)
 

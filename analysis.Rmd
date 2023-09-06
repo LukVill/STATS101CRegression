@@ -236,6 +236,59 @@ write_csv(test_rf_pred, "pred3RF.csv")
 ```
 
 
+```{r phase 2 of Luke's analysis}
+
+
+# TUNABLE PARAMS: penalty, mixture -- for generalized linear model
+regularized_model <- linear_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet")
+              
+# TUNABLE PARAMS: cost_complexity, tree depth
+tree_model <- decision_tree(cost_complexity = tune()) %>% 
+  set_engine("rpart") %>% 
+  set_mode("regression")
+
+# TUNABLE PARAMS: mtry, min n for each node
+r_forest_model <- rand_forest(trees = tune(), mtry = tune(), min_n = tune()) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+# random forest creates missing values for some reason when na's are ommitted, so imputation is used instead
+
+# TUNABLE PARAMS: tree num, min n for each node, learn rate, loss reduction, tree depth
+boost_tree_model <- boost_tree(learn_rate = tune(), loss_reduction = tune(), tree_depth = tune()) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+# TUNABLE PARAMS: hidden_units, penalty -- neural network ensamble 
+# Note: engine would not be recognized
+neural_model <- bag_mlp(hidden_units = tune(), penalty = tune()) %>% set_engine("nnet") %>% set_mode("regression") 
+
+
+model_list <- list(regularized_model, tree_model, r_forest_model, boost_tree_model, neural_model)
+
+# normal rec
+rec <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1})
+
+# knn imputation
+knn_rec <- rec %>% step_impute_knn(all_predictors())
+
+# linear reg imputation
+linreg_rec <- rec %>% step_impute_linear(all_predictors())
+
+# do log, boxcox
+knn_log_rec <- knn_rec %>% step_log(all_predictors())
+
+knn_boxcox_rec <- knn_rec %>% step_BoxCox(all_predictors())
+
+linreg_log_rec <- linreg_rec %>% step_log(all_predictors())
+
+linreg_boxcox_rec <- linreg_rec %>% step_BoxCox(all_predictors())
+
+recipe_list <- list(knn_rec = knn_rec, linreg_rec = linreg_rec, knn_log_rec = knn_log_rec, knn_boxcox_rec = knn_boxcox_rec, linreg_log_rec = linreg_log_rec, linreg_boxcox_rec = linreg_boxcox_rec)
+
+```
+
+
 ```{r}
 
 # TEST CODE
