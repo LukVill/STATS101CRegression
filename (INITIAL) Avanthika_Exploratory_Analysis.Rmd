@@ -1,0 +1,80 @@
+---
+title: "Avanthika - exploratory analysis"
+output: html_notebook
+---
+
+### Graph One
+```{r}
+library(ggplot2)
+
+# Filter the data to exclude groups with total population = 0
+train_filtered <- train %>%
+  filter(x0044e != 0 | x0071e != 0 | x0037e != 0 | x0038e != 0)
+
+# Create a scatterplot
+ggplot(train_filtered, aes(x = x0044e, y = percent_dem)) +
+  geom_point(aes(x = x0071e, color = "Hispanic"), alpha = 0.7) +
+  geom_point(aes(x = x0037e, color = "White"), alpha = 0.7) +
+  geom_point(aes(x = x0038e, color = "Black"), alpha = 0.7) +
+    geom_point(aes(color = "Asian"), alpha = 0.7) +
+  labs(
+    title = "Relationship Between Democratic Voters and Racial Composition",
+    x = "Total Population of Racial Group",
+    y = "Percentage of Democratic Voters",
+    color = "Racial Group"
+  ) +
+  scale_color_manual(values = c("Asian" = "blue", "Hispanic" = "yellow", "Black" = "green", "White" = "pink")) +
+  theme_minimal()
+
+```
+
+
+### Graph Two
+```{r}
+library(dplyr)
+library(ggplot2)
+
+train <- train %>%
+  mutate(
+    Education_Category = case_when(
+      c01_005e >= 30 ~ "Bachelor's or Higher",
+      c01_004e >= 30 ~ 'Some College',
+      c01_003e >= 30 ~ 'High School Graduate',
+      TRUE ~ 'Less than High School'
+    )
+  )
+
+education_democrat_data <- train %>%
+  group_by(Education_Category) %>%
+  summarise(Avg_Percent_Democrat = mean(percent_dem))
+
+ggplot(education_democrat_data, aes(x = Education_Category, y = Avg_Percent_Democrat)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(
+    title = "Relationship Between Education and Average Percent of Democratic Voters",
+    x = "Education Category",
+    y = "Average Percent of Democratic Voters"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+
+```
+
+```{r}
+library(ggplot2)
+
+ggplot(train, aes(x = factor(x2013_code), y = income_per_cap_2016, fill = cut(percent_dem, breaks = c(0, 25, 50, 75, 100)))) +
+  geom_boxplot() +
+  labs(
+    title = "Income per Capita (2016) by Rural/Urban Category and Percent Democratic Votes",
+    x = "Rural/Urban Category",
+    y = "Income per Capita (2016)",
+    fill = "Percent Democratic Votes"
+  ) +
+  scale_fill_brewer(palette = "Set3") + 
+  theme_minimal() +
+  theme(legend.title = element_blank()) 
+
+```
+
