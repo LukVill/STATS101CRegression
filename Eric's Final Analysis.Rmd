@@ -1,0 +1,595 @@
+---
+title: "Stats 101C - Regression Project"
+author: "Instructions"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    extra_dependencies: ["amsmath"]
+  html_document: default
+---
+```{r, echo = FALSE, message=FALSE}
+# INSTALL ALL THESE PACKAGES
+library(knitr)
+library(tidyverse)
+library(tidymodels)
+library(stacks)
+library(stringr)
+library(corrplot)
+library(yardstick)
+library(ranger)
+library(xgboost)
+```
+
+
+# Gameplan:
+
+  - vfold CV the training data
+  - Try multiple models: multiple linear, decision tree, random forest, boosted tree, mars, svm
+  - try multiple recipes: transformations on data
+  - make models tunable with different parameters
+  - make workflows with the different combinations of recipes and models with some parameters
+  - find best model
+  - fine tune the best model with more parameters
+  - top 5 best result on assessment data will move on to the testing data
+  - find lowest RMSE and highest RSQ 
+
+
+Getting initial glimpse of the data:
+
+```{r}
+
+# SET THE WD TO YOUR FOLDER
+
+trainFilepath <- paste0(getwd(),"/train.csv")
+testFilepath <- paste0(getwd(),"/test.csv")
+columnDescFilepath <- paste0(getwd(),"/column_descriptions.csv")
+
+train <- read.csv(trainFilepath)
+test <- read.csv(testFilepath)
+column_desc <- read.csv(columnDescFilepath)
+
+```
+
+```{r personal insights, message=F, eval=F}
+
+glimpse(train)
+glimpse(test)
+view(column_desc)
+
+summary(train)
+
+ncol(train)
+nrow(train)
+
+```
+
+Response variable has a skewed right distribution (median is on the lower end). Possibly should normalize the response variable.
+
+Data has big min's and max's, so there might be some need for sample stratification OR transformation. Most likely a log transformation because the predictor is percentage, so the range is only from 0-1.
+
+```{r transforming data via recipes}
+# remove name from training data
+train$name <- NULL
+```
+
+```{r v fold}
+# CROSS VALIDATE TRAIN TO AVOID OVERFITTING
+# set seed for reproducibility
+set.seed(101)
+# train_split <- vfold_cv(train, v = 5)
+# make strata be response variable
+train_split <- vfold_cv(train, v = 5, strata = percent_dem)
+```
+
+```{r model creation}
+
+## Base Linear Model
+linear_model <- linear_reg() %>% set_engine("lm") %>% set_mode("regression")
+
+# TUNABLE PARAMS: penalty, mixture -- for Generalized linear model
+regularized_model <- linear_reg(penalty = tune(), mixture = tune()) %>%
+  set_engine("glmnet")
+              
+# TUNABLE PARAMS: cost_complexity, tree depth
+tree_model <- decision_tree(cost_complexity = tune()) %>% 
+  set_engine("rpart") %>% 
+  set_mode("regression")
+
+# TUNABLE PARAMS: mtry, min n for each node
+## Best Results: trees = 48, mtry = 22, min_n = 2 
+r_forest_model <- rand_forest(mtry = 23) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+# random forest creates missing values for some reason when na's are ommitted, so imputation is used instead
+
+# TUNABLE PARAMS: tree num, min n for each node, learn rate, loss reduction, tree depth was at .301 and 140
+boost_tree_model <- boost_tree(learn_rate = .301, loss_reduction = 140) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+# TUNABLE PARAMS: cost, margin -- support vector machines
+svm_model <- svm_poly(cost = tune(), margin = tune()) %>%
+  set_engine("kernlab") %>%
+  set_mode("regression")
+
+# TUNABLE PARAMS: num_terms, prod_degree -- multivariate adaptive regression splines
+mars_model <- mars(num_terms = tune(), prod_degree = tune()) %>%
+  set_engine("earth") %>%
+  set_mode("regression")
+
+## Stack Ensamble: Linear Regression (simple_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec)
+
+### MAIN FOCUS MODELS:
+# Linear Model using log_norm_org_recipe
+# Simple Recipe Models: 
+# Decision Tree
+# Linear Model using simple
+# Rand Forest Model with tuned parameters specified to mtry = 23
+# Boosted Tree Models with tuned parameters from tuning grid: learning rate, loss reduction -- set to .28, and 140
+# Stack Model: Linear (using log_norm_org_rec), Random Forest and Boosted Tree both using simple_recipe
+
+model_list <- list(linear_model, r_forest_model, boost_tree_model)
+```
+
+Possible models: linear, decision tree, random forest, boosted tree and stack
+
+```{r workflow creation for default recipe}
+
+### Eric: Using three recipes: simple_rec, filter_rec, norm_rec -- all based on percentage population. Attempted to use spline recipes on significant variables based on linear regression, but the variables couldn't be recognized.
+### Another recipe org_rec uses raw data and log_norm_org recipe uses raw data that's log normalized -- data is filtered in org_rec.
+
+### Original Recipe
+org_rec <- recipe(percent_dem ~ ., data = train) %>% 
+  step_rm(id) %>% 
+  step_corr(all_numeric_predictors(), threshold = tune()) %>% 
+  step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% 
+  step_impute_knn(all_numeric_predictors())
+
+log_norm_org_rec <- org_rec %>% 
+  step_log(all_numeric_predictors(), base = 10) %>% 
+  step_normalize(all_numeric_predictors())
+
+### Made simple_rec (for stack 1)
+simple_rec <- recipe(percent_dem ~ ., data = train) %>%
+  step_mutate(pct_male = x0002e / x0001e * 100) %>%
+  # step_mutate(pct_female = x0003e / x0001e * 100) %>%
+  step_mutate(pct_under15 = (x0005e + x0006e + x0007e) * 100 / x0001e) %>%
+  step_mutate(pct_15thru19 = x0008e * 100 / x0001e) %>%
+  step_mutate(pct_20thru24 = x0009e * 100 / x0001e) %>%
+  step_mutate(pct_25thru34 = x0010e * 100 / x0001e) %>%
+  step_mutate(pct_35thru44 = x0011e * 100 / x0001e) %>%
+  step_mutate(pct_45thru54 = x0012e * 100 / x0001e) %>%
+  step_mutate(pct_55thru64 = (x0013e + x0014e) * 100 / x0001e) %>%
+  step_mutate(pct_65thru84 = (x0015e + x0016e) * 100 / x0001e) %>%
+  # step_mutate(pct_over85 = (x0017e) * 100 / x0001e) %>%
+  step_rename(median_age = x0018e) %>%
+  step_mutate(pct_u18 = x0019e * 100 / x0001e) %>%
+  step_mutate(pct_o16 = x0020e * 100 / x0001e) %>%
+  # step_mutate(pct_o18 = x0021e * 100 / x0001e) %>%
+  # step_mutate(pct_o21 = x0022e * 100 / x0001e) %>%
+  step_mutate(pct_o62 = x0023e * 100 / x0001e) %>%
+  # step_mutate(pct_o65 = x0024e * 100 / x0001e) %>%
+  step_mutate(pct_m_over18 = x0026e * 100 / x0001e) %>%
+  # step_mutate(pct_f_over18 = x0027e * 100 / x0001e) %>%
+  step_mutate(pct_m_over65 = x0030e * 100 / x0001e) %>%
+  # step_mutate(pct_f_over65 = x0031e * 100 / x0001e) %>%
+  step_mutate(pct_1race = x0034e * 100 / x0001e) %>%
+  # step_mutate(pct_over1race = x0035e * 100 / x0001e) %>%
+  step_mutate(pct_white = x0037e * 100 / x0001e) %>%
+  step_mutate(pct_black = x0038e * 100 / x0001e) %>%
+  # step_mutate(pct_natamer = (x0039e + x0040e + x0041e + x0042e + x0043e) * 100 / x0001e) %>%
+  step_mutate(pct_asian = x0044e * 100 / x0001e) %>%
+  step_mutate(pct_indian = x0045e * 100 / x0001e) %>%
+  step_mutate(pct_chinese = x0046e * 100 / x0001e) %>%
+  step_mutate(pct_filipino = x0047e * 100 / x0001e) %>%
+  step_mutate(pct_japan = x0048e * 100 / x0001e) %>%
+  step_mutate(pct_korean = x0049e * 100 / x0001e) %>%
+  step_mutate(pct_viet = x0050e * 100 / x0001e) %>%
+  # step_mutate(pct_asian_other = x0051e * 100 / x0001e) %>%
+  # step_mutate(pct_pac_isl = x0052e * 100 / x0001e) %>%
+  # step_mutate(pct_nat_haw = x0053e * 100 / x0001e) %>%
+  # step_mutate(pct_chamorro = x0054e * 100 / x0001e) %>%
+  step_mutate(pct_samoan = x0055e * 100 / x0001e) %>%
+  # step_mutate(pct_pacisl_other = x0056e * 100 / x0001e) %>%
+  step_mutate(pct_native_haw = (x0052e + x0053e + x0054e + x0055e + x0056e) * 100 / x0001e) %>%
+  step_mutate(pct_otherrace = x0057e * 100 / x0001e) %>%
+  # step_mutate(pct_white_black = x0059e * 100 / x0001e) %>%
+  step_mutate(pct_white_native = x0060e * 100 / x0001e) %>%
+  step_mutate(pct_white_asian = x0061e * 100 / x0001e) %>%
+  # step_mutate(pct_black_native = x0062e * 100 / x0001e) %>%
+  step_mutate(pct_whitecombo = x0064e * 100 / x0001e) %>%
+  # step_mutate(pct_blackcombo = x0065e * 100 / x0001e) %>%
+  # step_mutate(pct_nativecombo = x0066e * 100 / x0001e) %>%
+  # step_mutate(pct_asiancombo = x0067e * 100 / x0001e) %>%
+  step_mutate(pct_hawcombo = x0068e * 100 / x0001e) %>%
+  # step_mutate(pct_othercombo = x0069e * 100 / x0001e) %>%
+  step_mutate(pct_hispanic = x0071e * 100 / x0001e) %>%
+  step_mutate(pct_mexican = x0072e * 100 / x0001e) %>%
+  # step_mutate(pct_puerto = x0073e * 100 / x0001e) %>%
+  step_mutate(pct_cuban = x0074e * 100 / x0001e) %>%
+  # step_mutate(pct_hisp_other = x0075e * 100 / x0001e) %>%
+  # step_mutate(pct_not_hisp = x0076e * 100 / x0001e) %>%
+  step_mutate(pct_nhisp_owhite = x0077e * 100 / x0001e) %>%
+  step_mutate(pct_nhisp_oblack = x0078e * 100 / x0001e) %>%
+  step_mutate(pct_nhisp_onatamer = x0079e * 100 / x0001e) %>%
+  step_mutate(pct_nhisp_oasian = x0080e * 100 / x0001e) %>%
+  step_mutate(pct_nhisp_ohawi = x0081e * 100 / x0001e) %>%
+  # step_mutate(pct_nhisp_other= x0082e * 100 / x0001e) %>%
+  # step_mutate(pct_nhisp_twoother = x0083e * 100 / x0001e) %>%
+  step_rename(housing_units = x0086e) %>%
+  step_mutate(pct_18t24_nohsdegree = c01_002e * 100 / c01_001e) %>%
+  step_mutate(pct_18t24_hsdegree = c01_003e * 100 / c01_001e) %>%
+  step_mutate(pct_18t24_somecollege = c01_004e * 100 / c01_001e) %>%
+  step_mutate(pct_18t24_bachdegree = c01_005e * 100 / c01_001e) %>%
+  step_mutate(pct_o25_nohsdegree = (c01_007e + c01_008e) * 100 / c01_006e) %>%
+  step_mutate(pct_o25_hsdegree = c01_009e * 100 / c01_006e) %>%
+  step_mutate(pct_o25_somecollege = (c01_010e + c01_011e) * 100 / c01_006e) %>%
+  step_mutate(pct_o25_bachdegree = c01_012e * 100 / c01_006e) %>%
+  # step_mutate(pct_o25_graddegree = c01_013e * 100 / c01_006e) %>%
+  step_mutate(pct_25t34_hsormore = c01_017e * 100 / c01_016e) %>%
+  # step_mutate(pct_25t34_bachormore = c01_018e * 100 / c01_016e) %>%
+  # step_mutate(pct_35t44_hsormore = c01_020e * 100 / c01_019e) %>%
+  step_mutate(pct_35t44_bachormore = c01_021e * 100 / c01_019e) %>%
+  step_mutate(pct_45t64_hsormore = c01_023e * 100 / c01_022e) %>%
+  step_mutate(pct_45t64_bachormore = c01_024e * 100 / c01_022e) %>%
+  step_mutate(pct_o65_hsormore = c01_026e * 100 / c01_025e) %>%
+  step_mutate(pct_o65_bachormore = c01_027e * 100 / c01_025e) %>%
+  # Removed pct_18t24_bachdegree in impute
+  step_impute_knn(income_per_cap_2016, income_per_cap_2017, income_per_cap_2018, income_per_cap_2019, income_per_cap_2020, gdp_2016, gdp_2017, gdp_2018, gdp_2019, gdp_2020, pct_18t24_nohsdegree, pct_18t24_hsdegree, pct_18t24_somecollege, pct_18t24_bachdegree) %>%
+  step_mutate_at(total_votes, median_age, housing_units, income_per_cap_2016, income_per_cap_2017, income_per_cap_2018, income_per_cap_2019, income_per_cap_2020, gdp_2016, gdp_2017, gdp_2018, gdp_2019, gdp_2020, fn = function(x){x + 1}) %>%
+  step_log(total_votes, median_age, housing_units, income_per_cap_2016, income_per_cap_2017, income_per_cap_2018, income_per_cap_2019, income_per_cap_2020, gdp_2016, gdp_2017, gdp_2018, gdp_2019, gdp_2020, base = 10) %>%
+  step_rm(id, contains("x00"), contains("c01"), gdp_2016, gdp_2017, gdp_2018, gdp_2019, pct_18t24_nohsdegree, pct_18t24_somecollege)
+
+filter_rec <- simple_rec %>% 
+  step_corr(all_numeric_predictors(), threshold = tune())
+
+norm_rec <- simple_rec %>%
+  step_normalize(all_numeric_predictors())
+
+
+trained_rec <- prep(simple_rec, training = train)
+trained_data <- bake(trained_rec, new_data = train)
+
+
+recipe_list <- list(simple_rec = simple_rec)
+
+
+# recipe_list <- list(simple_rec = simple_rec,
+#                     filter_rec = filter_rec,
+#                     norm_rec = norm_rec,
+#                     org_rec = org_rec,
+#                     log_norm_org_rec = log_norm_org_rec)
+
+# make list of workflows
+wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = T)
+
+wf_set <- wf_set %>%
+anti_join(tibble(wflow_id = c("filter_rec_linear_reg_2", "filter_rec_rand_forest", "org_rec_rand_forest", "log_norm_org_rec_rand_forest")),
+by = "wflow_id")
+
+```
+
+
+
+```{r default recipe workflow pipeline}
+## Testing Model Performances under Simple_Rec
+set.seed(10)
+wf_metrics <- metric_set(rmse)
+
+wf_res <- wf_set %>%
+  workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
+
+wf_res %>% autoplot(select_best = T)
+wf_res %>% collect_metrics() %>% arrange(mean)
+```
+
+
+```{r Linear Regression Workflow -- Based on Percentage Pop Recipe}
+
+wf_lin <- workflow() %>% add_model(linear_model) %>% add_recipe(simple_rec)
+
+lin_model_fit <- wf_lin %>% fit(data = train)
+
+preds <- lin_model_fit %>% predict(new_data = train)
+
+training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+
+summary(extract_fit_engine(lin_model_fit))
+
+# make predictions
+preds <- final_model_fit %>% predict(new_data = test)
+test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
+
+# export predictions
+write_csv(test_preds, "linearpred.csv")
+```
+
+
+```{r Boosted Tree Workflow}
+### Boosted Tree -- Tree Depth 8, learn rate =  .225 -> now .29, loss reduction = 31 -> 140)
+set.seed(10)
+wf_bt <- workflow() %>% add_model(boost_tree_model) %>% add_recipe(simple_rec)
+
+recipes_param <- extract_parameter_set_dials(boost_tree_model)
+
+grid_bt <- grid_regular(
+  learn_rate(range = c(.18, .30),
+             trans = NULL),
+  loss_reduction(range = c(70, 200),
+             trans = NULL),
+  levels = 12)
+
+wf_bt_res <- wf_bt %>% tune_grid(resamples = train_split, grid = grid_bt, metrics = wf_metrics)
+
+wf_bt_res %>% collect_metrics() %>% arrange(mean)
+
+final_wf_param <- wf_bt_res %>% select_best(metric = "rmse")
+
+final_model <- finalize_workflow(wf_bt, final_wf_param)
+
+final_model_fit <- final_model %>% fit(data = train)
+
+preds <- final_model_fit %>% predict(new_data = train)
+
+training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+
+# make predictions
+preds <- final_model_fit %>% predict(new_data = test)
+test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
+
+# export predictions
+write_csv(test_preds, "boostedpred1.csv")
+```
+
+
+```{r Random Forest Workflow}
+### Random Forest -- Eric's -- When the r_forest_model mtry = tune(), i use this chunk, if i have mset set to a value, i use the following chunk
+## Best Param: mtry = 25
+set.seed(10)
+wf_rf <- workflow() %>% add_model(r_forest_model) %>% add_recipe(simple_rec)
+
+recipes_param <- extract_parameter_set_dials(r_forest_model) %>% finalize(trained_data)
+
+grid_rf <- grid_regular(mtry(range = c(18, 25)),
+                        levels = 8)
+
+wf_rf_res <- wf_rf %>% tune_grid(resamples = train_split, grid = grid_rf, metrics = wf_metrics)
+
+wf_rf_res %>% collect_metrics() %>% arrange(mean)
+
+final_wf_param <- wf_rf_res %>% select_best(metric = "rmse")
+
+final_model <- finalize_workflow(wf_rf, final_wf_param)
+
+final_model_fit <- final_model %>% fit(data = train)
+
+preds <- final_model_fit %>% predict(new_data = train)
+
+training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+```
+
+
+```{r Random Forest Workflow}
+# make predictions
+set.seed(10)
+best_rf_workflow <- workflow() %>%
+  add_model(r_forest_model) %>%
+  add_recipe(simple_rec)
+
+best_rf_model_fit <- best_rf_workflow %>% fit(data = train)
+
+preds <- best_rf_model_fit %>% predict(new_data = train)
+
+training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+
+rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+
+preds <- best_rf_model_fit %>% predict(new_data = test)
+test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
+
+write_csv(test_preds, "rforestpred5.csv")
+
+```
+
+
+```{r Random Forest Workflow}
+# export predictions
+write_csv(test_preds, "rforestpred4.csv")
+
+```
+
+
+
+```{r}
+## Stack Ensamble: Linear Regression (org_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec) -- 2nd Best Performer
+set.seed(10)
+ctrl_grid <- control_stack_grid()
+ctrl_res <- control_stack_resamples()
+
+# Linear Model
+linear_model_stk <- linear_reg() %>% 
+  set_engine("lm") %>% 
+  set_mode("regression")
+
+linear_reg_wf <- workflow() %>%
+  add_model(linear_model_stk) %>%
+  add_recipe(simple_rec)
+
+linear_reg_res <- linear_reg_wf %>%
+  fit_resamples(
+  resamples = train_split,
+  metrics = wf_metrics,
+  control = ctrl_res
+)
+
+
+# Rand Forest
+# TUNABLE PARAMS: mtry, min n for each node
+## Best Results: mtry = 23 for stack2, 22 for stack1
+r_forest_model_stk <- rand_forest(mtry = 22) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+r_forest_model_wf <- workflow() %>%
+  add_model(r_forest_model_stk) %>%
+  add_recipe(simple_rec)
+
+r_forest_reg_res <- r_forest_model_wf %>%
+  fit_resamples(
+    resamples = train_split,
+    metrics = wf_metrics,
+    control = ctrl_res
+  )
+
+#Boost Tree
+# TUNABLE PARAMS: tree num, min n for each node, learn rate, loss reduction, tree depth (stack 2 at .28)
+boost_tree_model_stk <- boost_tree(learn_rate = .301, loss_reduction = 140) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+boost_tree_model_wf <- workflow() %>%
+  add_model(boost_tree_model_stk) %>%
+  add_recipe(simple_rec)
+
+boost_tree_reg_res <- boost_tree_model_wf %>%
+  fit_resamples(
+    resamples = train_split,
+    metrics = wf_metrics,
+    control = ctrl_res
+  )
+
+election_data_stack <- stacks() %>%
+  add_candidates(linear_reg_res) %>%
+  add_candidates(r_forest_reg_res) %>%
+  add_candidates(boost_tree_reg_res)
+
+election_model_stack <- election_data_stack %>%
+  blend_predictions()
+
+autoplot(election_model_stack)
+autoplot(election_model_stack, type = "members")
+
+election_model_stack <- election_model_stack %>%
+  fit_members()
+
+election_model_train <- 
+  election_model_stack %>% predict(new_data = train)
+
+train_preds_stack <- train %>% 
+  select(percent_dem) %>% 
+  bind_cols(election_model_train)
+
+rmse(truth = percent_dem, estimate = .pred, data = train_preds_stack)
+
+
+election_model_test_preds <- 
+  election_model_stack %>% predict(new_data = test)
+
+test_preds_stack <- test %>%
+  select(id) %>%
+  bind_cols(election_model_test_preds) %>% 
+  rename(percent_dem = .pred)
+
+write_csv(test_preds_stack, "stackpreds5.csv")
+```
+
+
+```{r}
+## Stack Ensamble: Linear Regression (log_norm_org_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec) -- Best Performer
+set.seed(10)
+ctrl_grid <- control_stack_grid()
+ctrl_res <- control_stack_resamples()
+
+# Linear Model
+linear_model_stk <- linear_reg() %>% 
+  set_engine("lm") %>% 
+  set_mode("regression")
+
+linear_reg_wf <- workflow() %>%
+  add_model(linear_model_stk) %>%
+  add_recipe(log_norm_org_rec)
+
+linear_reg_res <- linear_reg_wf %>%
+  tune_grid(
+  resamples = train_split,
+  metrics = wf_metrics,
+  grid = 5,
+  control = ctrl_grid
+)
+
+
+# Rand Forest
+# TUNABLE PARAMS: mtry, min n for each node
+## Best Results: mtry = 23 for stack2, 22 for stack1
+r_forest_model_stk <- rand_forest(mtry = 22) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+r_forest_model_wf <- workflow() %>%
+  add_model(r_forest_model_stk) %>%
+  add_recipe(simple_rec)
+
+r_forest_reg_res <- r_forest_model_wf %>%
+  fit_resamples(
+    resamples = train_split,
+    metrics = wf_metrics,
+    control = ctrl_res
+  )
+
+#Boost Tree
+# TUNABLE PARAMS: tree num, min n for each node, learn rate, loss reduction, tree depth (stack 2 at .28)
+boost_tree_model_stk <- boost_tree(learn_rate = .301, loss_reduction = 140) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+boost_tree_model_wf <- workflow() %>%
+  add_model(boost_tree_model_stk) %>%
+  add_recipe(simple_rec)
+
+boost_tree_reg_res <- boost_tree_model_wf %>%
+  fit_resamples(
+    resamples = train_split,
+    metrics = wf_metrics,
+    control = ctrl_res
+  )
+
+election_data_stack <- stacks() %>%
+  add_candidates(linear_reg_res) %>%
+  add_candidates(r_forest_reg_res) %>%
+  add_candidates(boost_tree_reg_res)
+
+election_model_stack <- election_data_stack %>%
+  blend_predictions()
+
+autoplot(election_model_stack)
+autoplot(election_model_stack, type = "members")
+
+election_model_stack <- election_model_stack %>%
+  fit_members()
+
+election_model_train <- 
+  election_model_stack %>% predict(new_data = train)
+
+train_preds_stack <- train %>% 
+  select(percent_dem) %>% 
+  bind_cols(election_model_train)
+
+rmse(truth = percent_dem, estimate = .pred, data = train_preds_stack)
+
+
+election_model_test_preds <- 
+  election_model_stack %>% predict(new_data = test)
+
+test_preds_stack <- test %>%
+  select(id) %>%
+  bind_cols(election_model_test_preds) %>% 
+  rename(percent_dem = .pred)
+
+write_csv(test_preds_stack, "teststackpreds2.csv")
+```
