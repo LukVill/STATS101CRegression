@@ -1,0 +1,192 @@
+---
+title: "Mayerli_Exploratory_Analysis"
+author: "Mayerli Cordero-Cortes"
+date: "2023-09-08"
+output:
+  pdf_document: default
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+          DATA ANALYSIS
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(GGally)
+library(heatmaply)
+
+train_data <- read.csv("Downloads/train.csv")
+# Visualization 1: Scatter Plot between percent_dem and total_votes
+ggplot(train_data, aes(x = percent_dem, y = total_votes)) +
+  geom_point() +
+  labs(title = "Scatter Plot of percent_dem vs. total_votes",
+       x = "Percentage Democratic",
+       y = "Total Votes") +
+  theme_minimal()
+```
+
+This scatter plot shows the relationship between the percentage of Democratic votes (percent_dem) and the total number of votes (total_votes) in the dataset. It helps  understand if there is any correlation or pattern between these two variables.
+
+```{r}
+# Visualization 2: Histogram of percent_dem
+ggplot(train_data, aes(x = percent_dem)) +
+  geom_histogram() +
+  labs(title = "Histogram of percent_dem",
+       x = "Percentage Democratic",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+The histogram illustrates the distribution of the percentage of Democratic votes (percent-dem) across the dataset. It provides insight into the frequency of different percentage ranges, helping to identify common voting patterns.
+
+```{r}
+# Visualization 3: Box Plot of total_votes
+ggplot(train_data, aes(y = total_votes)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of total_votes",
+       y = "Total Votes") +
+  theme_minimal()
+```
+
+This box plot displays the distribution of total votes (total-votes). It highlights the median, quartiles, and potential outliers, offering a summary of the dataset's vote count distribution.
+
+```{r}
+# Visualization 4: Bar Chart for the first 10 rows
+ggplot(train_data[1:10, ], aes(x = name, y = x0001e)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Bar Chart of x0001e for the first 10 rows",
+       x = "Name",
+       y = "x0001e Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The bar chart represents the values of the variable x0001e for the first 10 rows in the dataset. It gives a visual comparison of these values, providing insights into the differences or similarities among the selected rows.
+
+```{r}
+# Visualization 5: Line Plot of x0020e
+ggplot(train_data, aes(x = id, y = x0020e)) +
+  geom_line() +
+  labs(title = "Line Plot of x0020e",
+       x = "ID",
+       y = "x0020e Value") +
+  theme_minimal()
+```
+
+The line plot shows the trend in the variable x0020e across the dataset. It helps us track changes in this variable's values over time or across data points, offering valuable information for analysis.
+
+```{r}
+# Visualization 6: Pair Plot for percent_dem, total_votes, and x0001e
+ggpairs(train_data[, c("percent_dem", "total_votes", "x0001e")])
+
+```
+The pair plot provides a matrix of scatter plots and histograms for percent-dem, total_votes, and x0001e. It helps visualize the relationships and distributions among these variables
+
+```{r}
+# Visualization 7: Heatmap of the correlation matrix for selected columns
+selected_columns <- c("percent_dem", "total_votes", "x0001e", "x0020e")
+heatmaply(cor(train_data[, selected_columns]), symm = TRUE)
+
+```
+
+This heatmap displays the correlation matrix among the selected columns (percent-dem, total_votes, x0001e, x0020e). It helps identify the strength and direction of relationships between these variables, assisting in understanding their interdependencies.
+
+      TEST.CSV ANALYSIS
+
+```{r}
+# Read the test data
+test_data <- read.csv("Downloads/test.csv")
+
+# Visualization 8: Scatter Plot between total_votes and x0001e
+ggplot(test_data, aes(x = total_votes, y = x0001e)) +
+  geom_point() +
+  labs(title = "Scatter Plot between total_votes and x0001e")
+
+```
+
+This scatter plot shows the relationship between the total number of votes and the variable x0001e. It aids visualize any patterns or trends between these two variables.
+
+```{r}
+# Visualization 9: Histogram of x0002e
+ggplot(test_data, aes(x = x0002e)) +
+  geom_histogram() +
+  labs(title = "Histogram of x0002e")
+```
+
+The histogram of x0002e provides an overview of the distribution of values in this variable. It shows the frequency of different values in x0002e and can help identify the central tendency and spread of the data.
+
+```{r}
+# Visualization 10: Box Plot of x0003e
+ggplot(test_data, aes(y = x0003e)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of x0003e")
+```
+
+The box plot presents a summary of the distribution of x0003e, including the median, quartiles, and potential outliers. It helps in making clearity the variability and skewness of the data.
+
+```{r}
+# Visualization 11: Bar Chart for the first 10 rows of x0005e
+ggplot(test_data[1:10, ], aes(x = seq_along(x0005e), y = x0005e)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Bar Chart for the first 10 rows of x0005e")
+```
+
+This bar chart displays the values of x0005e for the first 10 rows of the dataset. It helps for a quick comparison of these values and reveals  differences or similarities among them.
+
+```{r}
+# Visualization 12: Line Plot of x0006e
+ggplot(test_data, aes(x = seq_along(x0006e), y = x0006e)) +
+  geom_line() +
+  labs(title = "Line Plot of x0006e")
+
+```
+
+The line plot illustrates the trend or pattern in the variable x0006e across the dataset. It can help identify any long-term changes or fluctuations in the data.
+
+```{r}
+# Visualization 13: Pair Plot for x0007e, x0008e, and x0009e
+ggpairs(test_data[, c("x0007e", "x0008e", "x0009e")])
+```
+
+The pair plot provides a matrix of scatter plots for the variables x0007e, x0008e, and x0009e, allowing in the  exploration of  relationships between these variables simultaneously.
+
+```{r}
+# Visualization 14: Heatmap of the correlation matrix for selected columns
+selected_columns <- c("x0010e", "x0011e", "x0012e", "x0013e")
+heatmaply(cor(test_data[, selected_columns]), symm = TRUE)
+
+```
+
+This heatmap displays the correlations between the variables x0010e, x0011e, x0012e, and x0013e. It makes clar how these variables are related, with warmer colors indicating stronger correlations.
+
+```{r}
+# Visualization 15: Density Plot of x0014e
+ggplot(test_data, aes(x = x0014e)) +
+  geom_density() +
+  labs(title = "Density Plot of x0014e")
+```
+
+The density plot visualizes the distribution of x0014e as a smooth curve. It provides insights into the shape and spread of the data, highlighting areas of high and low density.
+
+```{r}
+# Visualization 16: Scatter Plot between x0015e and x0016e
+ggplot(test_data, aes(x = x0015e, y = x0016e)) +
+  geom_point() +
+  labs(title = "Scatter Plot between x0015e and x0016e")
+
+```
+This scatter plot shows the relationship between the variables x0015e and x0016e. It helps identify any patterns or trends between these two variables and their potential impact on each other.
+
+```{r}
+# Visualization 17: Box Plot of x0017e
+ggplot(test_data, aes(y = x0017e)) +
+  geom_boxplot() +
+  labs(title = "Box Plot of x0017e")
+```
+
+The box plot summarizes the distribution of x0017e, including key statistics like the median and quartiles. It also helps identify potential outliers and assess the variability of the data in x0017e.
