@@ -17,6 +17,10 @@ library(corrplot)
 library(yardstick)
 library(ranger)
 library(xgboost)
+library(baguette)
+library(glmnet)
+library(kknn)
+library(stacks)
 ```
 
 
@@ -30,7 +34,7 @@ library(xgboost)
   - find best model
   - fine tune the best model with more parameters
   - top 5 best result on assessment data will move on to the testing data
-  - find lowest RMSE and highest RSQ 
+  - find lowest RMSE 
 
 
 Getting initial glimpse of the data:
@@ -47,6 +51,9 @@ train <- read.csv(trainFilepath)
 test <- read.csv(testFilepath)
 column_desc <- read.csv(columnDescFilepath)
 
+# remove name from training data
+train$name <- NULL
+
 ```
 
 ```{r personal insights, message=F, eval=F}
@@ -60,6 +67,43 @@ summary(train)
 ncol(train)
 nrow(train)
 
+cols_train <- colnames(train)[-1]
+
+age_group_corr_plot <- train %>% select(percent_dem, cols_train[6:18]) %>% cor(use = "pairwise.complete.obs") %>% as.data.frame() %>% filter(row_number() == 1) %>% pivot_longer(everything(), names_to = "vars1", values_to = "vals") %>% mutate(vars2 = "percent_dem") %>% ggplot(aes(x = vars2, y = vars1, fill = vals)) + geom_tile() + scale_fill_gradient(low = "white", high = "blue") + labs(title = "Age Groups' Correlations")
+
+race_group_corr_plot <- train %>% select(percent_dem, cols_train[36:56]) %>% cor(use = "pairwise.complete.obs") %>% as.data.frame() %>% filter(row_number() == 1) %>% pivot_longer(everything(), names_to = "vars1", values_to = "vals") %>% mutate(vars2 = "percent_dem") %>% ggplot(aes(x = vars2, y = vars1, fill = vals)) + geom_tile() + scale_fill_gradient(low="white", high="blue") + labs(title = "Race Groups' Correlations")
+
+education_group_corr_plot <- train %>% select(percent_dem, cols_train[87:113]) %>% cor(use = "pairwise.complete.obs") %>% as.data.frame() %>% filter(row_number() == 1) %>% pivot_longer(everything(), names_to = "vars1", values_to = "vals") %>% mutate(vars2 = "percent_dem") %>% ggplot(aes(x = vars2, y = vars1, fill = vals)) + geom_tile() + scale_fill_gradient(low="white", high="blue") + labs(title = "Education Groups' Correlations")
+
+train <- read.csv(trainFilepath)
+train_longer_df <- train %>% select(-1) %>% relocate(name, .before = percent_dem)
+cols_train_longer <- train_longer_df %>% colnames()
+train_longer <- train_longer_df %>% pivot_longer(cols_train_longer[2:125], names_to = "vars", values_to = "vals")
+
+train <- train %>% select(-c(1,2,4))
+
+#126
+help(par)
+
+par(mfrow = c(4,2))
+for(i in colnames(train)[3:10])
+{
+  print(i)
+  train %>% pull(i) %>% hist(main = paste0("Hist of ", i))
+}
+
+train %>% select(-c(1,2,3,4)) %>% pivot_longer(everything(), names_to = "vars", values_to = "vals") %>% group_by(vars) %>% summarize()
+help(summarize)
+train %>% select("total_votes") %>% ggplot(aes(x = total_votes)) + geom_histogram(bins = 100) + scale_x_continuous()
+train %>% ggplot(aes(x = total_votes)) + geom_histogram(bins = 100)
+train %>% ggplot(aes(x = noquote(i))) + geom_histogram(bins = 100)
+train %>% pull(i) %>% hist()
+train %>% select(i) %>% ggplot(aes(x = i)) + geom_histogram(bins = 100)
+ggplot(gather(train), aes(value)) + geom_histogram(binwidth = 0.5, bins = 100) + facet_wrap(~key, scales = "free_x")
+train %>% pivot_longer(everything(),names_to = "vars", values_to = "vals") %>% ggplot(aes(x = vals)) + geom_histogram(bins = 100) + facet_wrap(vars(vars))
+help(boxplot)
+
+# train %>% select(percent_dem, cols_train[11:20]) %>% cor() %>% corrplot(type = "upper")
 ```
 
 Response variable has a skewed right distribution (median is on the lower end). Possibly should normalize the response variable.
@@ -67,9 +111,6 @@ Response variable has a skewed right distribution (median is on the lower end). 
 Data has big min's and max's, so there might be some need for sample stratification OR transformation. Most likely a log transformation because the predictor is percentage, so the range is only from 0-1.
 
 ```{r transforming data via recipes}
-
-# remove name from training data
-train$name <- NULL
 
 # possible transformations: log, normalization, boxcox
 
@@ -164,16 +205,18 @@ wf_metrics <- metric_set(rmse, rsq)
 wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, metrics = wf_metrics)
 
 wf_metric_res <- wf_res %>% collect_metrics()
-wf_res %>% autoplot()
+phase1plot <- wf_res %>% autoplot()
 wf_res %>% collect_metrics() %>% filter(.metric == "rmse") %>% arrange(mean)
 help(select_best)
 wf_res %>% show_best(metric = "rmse", n = 5)
 
 # find best model 
 
-grid_lin <- grid_regular(parameters(wf_lin), levels = 4)
+
 
 wf_lin <- workflow() %>% add_model(linear_model) %>% add_recipe(log_norm_rec)
+
+grid_lin <- grid_regular(parameters(wf_lin), levels = 4)
 
 wf_lin_res <- wf_lin %>% tune_grid(resamples = train_split, grid = grid_lin, metrics = wf_metrics)
 
@@ -181,27 +224,50 @@ wf_lin_metric_res <- wf_lin_res %>% show_best(metric = "rmse", n = 5)
 
 final_wf_param <- wf_lin_res %>% select_best(metric = "rmse")
 
-final_model <- finalize_workflow(wf_lin, final_wf_param)
-
-final_model_fit <- final_model %>% fit(data = train)
-
-preds <- final_model_fit %>% predict(new_data = train)
-
-
-training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
-
-rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
-
-summary(extract_fit_engine(final_model_fit))
-
-# make predictions
-preds <- final_model_fit %>% predict(new_data = test)
-test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
-
-# export predictions
-write_csv(test_preds, "pred2.csv")
+# final_model <- finalize_workflow(wf_lin, final_wf_param)
+# 
+# final_model_fit <- final_model %>% fit(data = train)
+# 
+# preds <- final_model_fit %>% predict(new_data = train)
+# 
+# 
+# training_pred_chart <- train %>% select(percent_dem) %>% bind_cols(preds)
+# 
+# rmse(truth = percent_dem, estimate = .pred, data = training_pred_chart)
+# 
+# summary(extract_fit_engine(final_model_fit))
+# 
+# # make predictions
+# preds <- final_model_fit %>% predict(new_data = test)
+# test_preds <- test %>% select(id) %>% bind_cols(preds) %>% rename(percent_dem = .pred)
+# 
+# # export predictions
+# write_csv(test_preds, "pred2.csv")
 
 ```
+
+```{r for model evalution report Luke's analysis}
+
+set.seed(101)
+
+wf_metrics <- metric_set(rmse, rsq)
+
+modelEval_modelList <- list(linear_reg = linear_model, rand_forest = r_forest_model, boosted_tree = boost_tree_model, decision_tree = tree_model)
+
+modelEval_recList <- list(log_norm_org_rec = log_norm_rec, org_rec = rec)
+
+modelEval_wf <- workflow_set(preproc = modelEval_recList, models = modelEval_modelList, cross = TRUE)
+
+modelEval_wf_res <- modelEval_wf %>% workflow_map(fn = "tune_grid", verbose = TRUE, resamples = train_split, grid = 10, metrics = wf_metrics)
+
+modelEval_wf_res_metrics <- modelEval_wf_res %>% collect_metrics() %>% filter(.metric == "rmse", model %in% c("linear_reg","boost_tree", "decision_tree")) %>% arrange(mean)
+
+modelEval_wf_res %>% collect_metrics() %>% filter(.metric == "rmse") %>% arrange(mean)
+
+modelEval_wf_res_plot <- modelEval_wf_res %>% autoplot()
+
+```
+
 
 ```{r trying out random forest predictions}
 
@@ -235,9 +301,16 @@ write_csv(test_rf_pred, "pred3RF.csv")
 
 ```
 
+Phase two of Luke's analysis
+```{r}
 
-```{r phase 2 of Luke's analysis}
+# set seed for reproducibility
+set.seed(101)
 
+# train_split <- vfold_cv(train, v = 5)
+
+# make strata be response variable
+train_split <- vfold_cv(train, v = 10, strata = percent_dem)
 
 # TUNABLE PARAMS: penalty, mixture -- for generalized linear model
 regularized_model <- linear_reg(penalty = tune(), mixture = tune()) %>%
@@ -249,7 +322,7 @@ tree_model <- decision_tree(cost_complexity = tune()) %>%
   set_mode("regression")
 
 # TUNABLE PARAMS: mtry, min n for each node
-r_forest_model <- rand_forest(trees = tune(), mtry = tune(), min_n = tune()) %>% 
+r_forest_model <- rand_forest(trees = tune(), mtry = 22, min_n = tune()) %>% 
   set_engine("ranger") %>% 
   set_mode("regression")
 # random forest creates missing values for some reason when na's are ommitted, so imputation is used instead
@@ -260,37 +333,94 @@ boost_tree_model <- boost_tree(learn_rate = tune(), loss_reduction = tune(), tre
   set_mode("regression")
 
 # TUNABLE PARAMS: hidden_units, penalty -- neural network ensamble 
-# Note: engine would not be recognized
 neural_model <- bag_mlp(hidden_units = tune(), penalty = tune()) %>% set_engine("nnet") %>% set_mode("regression") 
 
+# TUNABLE PARAMS: none
+knn_model <- nearest_neighbor() %>% set_engine("kknn") %>% set_mode("regression")
 
-model_list <- list(regularized_model, tree_model, r_forest_model, boost_tree_model, neural_model)
+model_list <- list(regularized_model, r_forest_model, boost_tree_model, neural_model, knn_model)
 
 # normal rec
 rec <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1})
 
 # knn imputation
-knn_rec <- rec %>% step_impute_knn(all_predictors())
+knn_rec <- rec %>% step_impute_knn(all_predictors()) %>% step_naomit(all_predictors())
 
-# linear reg imputation
-linreg_rec <- rec %>% step_impute_linear(all_predictors())
+# # bag imputation
+# bag_rec <- rec %>% step_impute_bag(trees = tune())
+
+# test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 0.8) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_bag(all_predictors(), trees = 10) %>% prep() %>% bake(new_data = NULL)
+
+# # linear reg imputation
+# linreg_rec <- rec %>% step_impute_linear(all_predictors())
+# couldn't work because there are too many missing values in some predictors
+# test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 0.8) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_imput_linear(all_predictors()) %>% prep() %>% bake(new_data = NULL)
+
 
 # do log, boxcox
 knn_log_rec <- knn_rec %>% step_log(all_predictors())
 
 knn_boxcox_rec <- knn_rec %>% step_BoxCox(all_predictors())
 
-linreg_log_rec <- linreg_rec %>% step_log(all_predictors())
+# linreg_log_rec <- linreg_rec %>% step_log(all_predictors())
 
-linreg_boxcox_rec <- linreg_rec %>% step_BoxCox(all_predictors())
+# linreg_boxcox_rec <- linreg_rec %>% step_BoxCox(all_predictors())
 
-recipe_list <- list(knn_rec = knn_rec, linreg_rec = linreg_rec, knn_log_rec = knn_log_rec, knn_boxcox_rec = knn_boxcox_rec, linreg_log_rec = linreg_log_rec, linreg_boxcox_rec = linreg_boxcox_rec)
+# bag_log_rec <- bag_rec %>% step_log(all_predictors())
+# 
+# bag_boxcox_rec <- bag_rec %>% step_BoxCox(all_predictors())
 
+# recipe_list <- list(knn_rec = knn_rec, bag_rec = bag_rec, knn_log_rec = knn_log_rec, knn_boxcox_rec = knn_boxcox_rec, bag_log_rec = bag_log_rec, bag_boxcox_rec = bag_boxcox_rec)
+
+recipe_list <- list(knn_rec = knn_rec, knn_log_rec = knn_log_rec, knn_boxcox_rec = knn_boxcox_rec)
+
+# work flow set creation
+wf_set <- workflow_set(preproc = recipe_list, models = model_list, cross = TRUE)
+
+wf_metrics <- metric_set(rmse)
+
+wf_res <- wf_set %>% workflow_map(fn = "tune_grid", resamples = train_split, grid = 5, verbose = TRUE, metrics = wf_metrics)
+
+wf_res_metrics <- wf_res %>% collect_metrics()
+
+wf_res_metrics %>% arrange(mean)
+
+# initial run 1: 
+# PROBLEM: anything with knn and random forest did not work
+# SOLUTION: mtry does not like being tuned, so for workflow mapping, just focus on trees and min_n for random forest 
+# wf_test <- workflow() %>% add_model(rand_forest(trees = 1, mtry = tune(), min_n = 1) %>%
+#   set_engine("ranger") %>%
+#   set_mode("regression")) %>% add_recipe(recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 0.8) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_predictors())) %>% tune_grid(resamples = train_split, grid = 1, metrics = wf_metrics)
+
+# PROBLEM: bag_rec_linear_reg has missing values, any combo of bag_rec and linear_reg has the same missing values error, there are no inherent NULLS in recipe after baked to the training data,
+# SOLUTION: the missing 45 data in each of the latter columns are not at all imputed because i think bagging and linear regression don't like to work with that many successively missing data, so add step_naomit to the end of the imputed recipes. NOTE: this will work with rand_forests, just make sure the imputation and NA omitting both work and that MTRY is not tuned at all
+# rec_test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn() %>% prep() %>% bake(new_data = NULL)
+# rec_test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn() %>% step_naomit(all_predictors()) %>% prep() %>% bake(new_data = NULL)
+#  any(is.na(rec_test))
+# wf_test <- workflow() %>% add_model(linear_reg(penalty = tune(), mixture = tune()) %>%
+#   set_engine("glmnet")) %>% add_recipe(recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn() %>% step_naomit(all_predictors())) %>% tune_grid(resamples = train_split, grid = 1, metrics = wf_metrics)
+# rec_test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn() %>% step_naomit(all_predictors()) %>% prep() %>% bake(new_data = NULL)
+# wf_test <- workflow() %>% add_model(rand_forest(trees = tune(), mtry = 1, min_n = tune()) %>%
+#   set_engine("ranger") %>%
+#   set_mode("regression")) %>% add_recipe(recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_predictors()) %>% step_naomit(all_predictors())) %>% tune_grid(resamples = train_split, grid = 1, metrics = wf_metrics)
+# wf_test %>% collect_metrics()
+
+
+# PROBLEM: bag and rand forest don't like the parameters
+
+# wf_test <- workflow() %>% add_model(rand_forest(trees = tune(), mtry = 1, min_n = tune()) %>%
+#   set_engine("ranger") %>%
+#   set_mode("regression")) %>% add_recipe(recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = 1) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_bag(all_predictors()) %>% step_naomit(all_predictors())) %>% tune_grid(resamples = train_split, grid = 1, metrics = wf_metrics)
+
+# PROBLEM: knn model has an issue with bagging recipe, 
+# SOLUTION: just removed bag_rec entirely, too lazy
+
+# this should be the last main issue for run 1
 ```
 
 
 ```{r}
-
+help(bag_mlp)
 # TEST CODE
 # test <- recipe(percent_dem ~ ., data = train) %>% step_rm(id) %>% step_corr(all_numeric_predictors(), threshold = tune()) %>% step_mutate_at(all_numeric_predictors(), fn = function(x){x + 1}) %>% step_impute_knn(all_numeric_predictors()) %>% step_normalize(all_numeric_predictors())
 # wf_test <- workflow() %>% add_model(r_forest_model) %>% add_recipe(test)

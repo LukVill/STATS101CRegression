@@ -12,12 +12,15 @@ output:
 library(knitr)
 library(tidyverse)
 library(tidymodels)
-library(stacks)
 library(stringr)
 library(corrplot)
 library(yardstick)
 library(ranger)
 library(xgboost)
+library(baguette)
+library(glmnet)
+library(kknn)
+library(stacks)
 ```
 
 
@@ -148,16 +151,16 @@ mars_model <- mars(num_terms = tune(), prod_degree = tune()) %>%
   set_mode("regression")
 
 # TUNABLE PARAMS: hidden_units, penalty -- neural network ensamble 
-# Note: engine would not be recognized
-nn_stack <- bag_mlp(hidden_units = tune(), penalty = tune()) %>% set_engine("nnet") %>% set_mode("regression") 
+neural_model <- bag_mlp(epochs = 500) %>% set_engine("nnet") %>% set_mode("regression") 
+
+# TUNABLE PARAMS: none
+knn_model <- nearest_neighbor() %>% set_engine("kknn") %>% set_mode("regression")
 
 
 ## Stack Ensamble: Linear Regression (org_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec)
 
 
 model_list <- list(linear_model, r_forest_model, boost_tree_model)
-
-
 
 ```
 
@@ -528,7 +531,93 @@ write_csv(test_preds, "rforestpred4.csv")
 
 ```
 
+```{r Luke's new models with Eric's recipes}
+set.seed(101)
 
+wf_metrics <- metric_set(rmse)
+
+luke_recipe_list <- list(simple_rec = simple_rec, filter_rec = filter_rec, norm_rec = norm_rec)
+
+luke_model_list <- list(boost_tree_model = boost_tree_model, neural_model = neural_model, knn_model = knn_model)
+
+luke_wf_set <- workflow_set(preproc = luke_recipe_list, models = luke_model_list, cross = TRUE)
+
+luke_wf_set_res <- luke_wf_set %>% workflow_map(fn = "tune_grid", verbose = TRUE, resamples = train_split, grid = 5, metrics = wf_metrics)
+
+luke_wf_set_res_<- luke_wf_set_res %>% collect_metrics()
+
+luke_wf_set_res_ %>% arrange(mean)
+
+```
+
+```{r fine tuning of neural network}
+
+nn_wf_tune <- workflow() %>% add_model(neural_model) %>% add_recipe(norm_rec)
+
+nn_grid <- grid_regular(parameters(nn_wf_tune), levels = 5) 
+mlp_dials <- extract_parameter_set_dials(neural_model) 
+mlp_dials <- mlp_dials %>% update(hidden_units = hidden_units(range = c(10L,20L)))
+nn_grid_v2 <- nn_grid %>% update(hidden_units = hidden_units(range = c(10L,20L)))
+grid_regular(nn_grid_v2, levels = 5)
+
+nn_wf_tuned <- nn_wf_tune %>% tune_grid(resamples = train_split, grid = nn_grid, metrics = wf_metrics)
+
+nn_wf_tuned_metrics <- nn_wf_tuned %>% collect_metrics()
+help(hidden_units)
+```
+
+```{r Luke's stack}
+
+set.seed(10)
+ctrl_grid <- control_stack_grid()
+ctrl_res <- control_stack_resamples()
+
+boost_tree_model_stack <- boost_tree(learn_rate = .301, loss_reduction = 140) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+boost_tree_model_wf <- workflow() %>%
+  add_model(boost_tree_model_stack) %>%
+  add_recipe(simple_rec)
+
+boost_tree_reg_res <- boost_tree_model_wf %>%
+  fit_resamples(
+    resamples = train_split,
+    metrics = wf_metrics,
+    control = ctrl_res
+  )
+
+boost_tree_reg_res %>% collect_metrics(summarize = F) %>% ggplot(aes(x = id, y = .estimate, fill = id)) + geom_bar(stat = "identity", show.legend = F) + labs(title = "Boosted Tree Model Cross Validation Results with simple_rec", x = "Fold ID", y = "RMSE Estimate") 
+
+neural_model_stack <- bag_mlp() %>% set_engine("nnet") %>% set_mode("regression")
+
+neural_model_wf <- workflow() %>% add_model(neural_model) %>% add_recipe(norm_rec)
+
+neural_model_res <- neural_model_wf %>% fit_resamples(resamples = train_split, metrics = wf_metrics, control = ctrl_res)
+
+neural_model_metrics_plot <- neural_model_res %>% collect_metrics(summarize = F) %>% ggplot(aes(x = id, y = .estimate, fill = id)) + geom_bar(stat = "identity", show.legend = F) + labs(title = "Neural Network Model Cross Validation Results with norm_rec", x = "Fold ID", y = "RMSE Estimate") 
+
+luke_stack <- stacks() %>% add_candidates(boost_tree_reg_res) %>% add_candidates(neural_model_res) 
+
+luke_stack_blend <- luke_stack %>% blend_predictions()
+
+luke_stack_plot <- autoplot(luke_stack_blend)
+
+luke_stack_model <- luke_stack_blend %>% fit_members()
+
+luke_stack_train_res <- luke_stack_model %>% predict(new_data = train)
+
+train_check <- train %>% select(percent_dem) %>% bind_cols(luke_stack_train_res %>% select(.pred))
+
+rmse(train_check, estimate = .pred, truth = percent_dem)
+
+luke_stack_test_res <- luke_stack_model %>% predict(new_data = test)
+
+test_res <- test %>% select(id) %>% bind_cols(luke_stack_test_res %>% select(.pred)) %>% rename(percent_dem = .pred)
+
+write_csv(test_res, "lukeStackPreds.csv")
+
+```
 
 ```{r}
 ## Stack Ensamble: Linear Regression (org_recipe), Boosted Tree(simple_rec), Random Forest(simple_rec)
